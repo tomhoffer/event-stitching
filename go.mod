@@ -1,4 +1,4 @@
-module stitching-tests
+module github.com/tomashoffer/event-stitching
 
 go 1.23.0
 
