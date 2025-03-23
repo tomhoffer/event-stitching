@@ -2,7 +2,6 @@ package db_test
 
 import (
 	"context"
-	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
@@ -11,27 +10,22 @@ import (
 	"github.com/tomashoffer/event-stitching/internal/db"
 )
 
-func TestMain(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Main Suite")
-}
-
-type testContext struct {
+type eventTestContext struct {
 	connPool      *pgxpool.Pool
-	repo          *db.Repository
+	repo          *db.EventRepository
 	ingestService *internal.EventIngestService
 	ingestCtx     context.Context
 	cancelIngest  context.CancelFunc
 }
 
-func setupTest(ctx SpecContext, numWorkers int) *testContext {
+func setupEventTest(ctx SpecContext, numWorkers int) *eventTestContext {
 	var err error
-	tc := &testContext{}
+	tc := &eventTestContext{}
 
 	tc.connPool, err = pgxpool.New(ctx, "postgres://myuser:mypassword@localhost:5432/mydatabase")
 	Expect(err).NotTo(HaveOccurred())
 
-	tc.repo = db.NewRepository(tc.connPool)
+	tc.repo = db.NewEventRepository(tc.connPool)
 
 	// Clean up the database before each test
 	_, err = tc.connPool.Exec(ctx, "TRUNCATE TABLE events")
@@ -45,7 +39,7 @@ func setupTest(ctx SpecContext, numWorkers int) *testContext {
 	return tc
 }
 
-func (tc *testContext) cleanup() {
+func (tc *eventTestContext) cleanup() {
 	if tc.cancelIngest != nil {
 		tc.cancelIngest()
 	}
@@ -54,7 +48,7 @@ func (tc *testContext) cleanup() {
 	}
 }
 
-func (tc *testContext) testSingleEvent(ctx SpecContext) {
+func (tc *eventTestContext) testSingleEvent(ctx SpecContext) {
 	generatedEvent := db.GenerateRandomEvent()
 
 	tc.ingestService.Queue <- generatedEvent
@@ -77,7 +71,7 @@ func (tc *testContext) testSingleEvent(ctx SpecContext) {
 	}).WithContext(ctx).Should(Equal(generatedEvent), "Expected event details to match")
 }
 
-func (tc *testContext) testMultipleEvents(ctx SpecContext) {
+func (tc *eventTestContext) testMultipleEvents(ctx SpecContext) {
 	numOfEvents := 10
 	insertedEvents := make([]db.EventRecord, numOfEvents)
 
@@ -96,10 +90,10 @@ func (tc *testContext) testMultipleEvents(ctx SpecContext) {
 }
 
 var _ = Describe("Event Record Insertion - 2 workers", func() {
-	var tc *testContext
+	var tc *eventTestContext
 
 	BeforeEach(func(ctx SpecContext) {
-		tc = setupTest(ctx, 2)
+		tc = setupEventTest(ctx, 2)
 	})
 
 	AfterEach(func() {
@@ -116,10 +110,10 @@ var _ = Describe("Event Record Insertion - 2 workers", func() {
 })
 
 var _ = Describe("Event Record Insertion - 1 worker", func() {
-	var tc *testContext
+	var tc *eventTestContext
 
 	BeforeEach(func(ctx SpecContext) {
-		tc = setupTest(ctx, 1)
+		tc = setupEventTest(ctx, 1)
 	})
 
 	AfterEach(func() {

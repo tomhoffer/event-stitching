@@ -8,12 +8,12 @@ import (
 )
 
 type EventIngestService struct {
-	repo       *db.Repository
+	repo       *db.EventRepository
 	numWorkers int
 	Queue      chan db.EventRecord
 }
 
-func NewEventIngestService(repo *db.Repository, numWorkers int) *EventIngestService {
+func NewEventIngestService(repo *db.EventRepository, numWorkers int) *EventIngestService {
 	return &EventIngestService{
 		repo:       repo,
 		numWorkers: numWorkers,

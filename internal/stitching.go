@@ -9,15 +9,17 @@ import (
 )
 
 type StitchingService struct {
-	repo              *db.Repository
+	profileRepo       *db.ProfileRepository
+	eventRepo         *db.EventRepository
 	stitchingInterval time.Duration
 	numWorkers        int
 	batchSize         int
 }
 
-func NewStitchingService(repo *db.Repository, stitchingInterval time.Duration, numWorkers, batchSize int) *StitchingService {
+func NewStitchingService(profileRepo *db.ProfileRepository, eventRepo *db.EventRepository, stitchingInterval time.Duration, numWorkers, batchSize int) *StitchingService {
 	return &StitchingService{
-		repo:              repo,
+		profileRepo:       profileRepo,
+		eventRepo:         eventRepo,
 		stitchingInterval: stitchingInterval,
 		numWorkers:        numWorkers,
 		batchSize:         batchSize,
@@ -43,14 +45,14 @@ func (s *StitchingService) stitchWorker(ctx context.Context) {
 }
 
 func (s *StitchingService) stitch(ctx context.Context) {
-	events, err := s.repo.GetUnProcessedEvents(ctx, s.batchSize)
+	events, err := s.eventRepo.GetUnProcessedEvents(ctx, s.batchSize)
 	if err != nil {
 		fmt.Printf("Failed to query unstitched events: %v\n", err)
 		return
 	}
 
 	for _, event := range events {
-		profile, err, found := s.repo.TryGetProfileByIdentifiers(ctx, event.EventIdentifier)
+		profile, err, found := s.profileRepo.TryGetProfileByIdentifiers(ctx, event.EventIdentifier)
 		if err != nil {
 			fmt.Printf("Failed to get profile by identifiers, moving on to next event... %v: %v\n", event.EventIdentifier, err)
 			continue
@@ -64,14 +66,14 @@ func (s *StitchingService) stitch(ctx context.Context) {
 				Phone:     event.EventIdentifier.Phone,
 			}
 
-			err = s.repo.InsertProfile(ctx, profile)
+			err = s.profileRepo.InsertProfile(ctx, profile)
 			if err != nil {
 				fmt.Printf("Failed to insert profile: %v\n", err)
 				continue
 			}
 		}
 		fmt.Printf("Stitched event: %v\n", profile)
-		if err := s.repo.MarkEventAsProcessed(ctx, event); err != nil {
+		if err := s.eventRepo.MarkEventAsProcessed(ctx, event); err != nil {
 			fmt.Printf("Failed to mark event as stitched: %v\n", err)
 			continue
 		}
