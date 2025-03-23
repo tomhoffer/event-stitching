@@ -1,4 +1,4 @@
-CREATE TABLE profiles (cookie varchar(4096), message_id varchar(1024), phone varchar(14), stitched boolean DEFAULT false);
+CREATE TABLE profiles (id SERIAL PRIMARY KEY, cookie varchar(4096), message_id varchar(1024), phone varchar(14));
 
 CREATE TABLE events (
     id SERIAL PRIMARY KEY,

@@ -43,7 +43,6 @@ func (s *StitchingService) stitchWorker(ctx context.Context) {
 }
 
 func (s *StitchingService) stitch(ctx context.Context) {
-	fmt.Println("Stitching events")
 	events, err := s.repo.GetUnProcessedEvents(ctx, s.batchSize)
 	if err != nil {
 		fmt.Printf("Failed to query unstitched events: %v\n", err)
@@ -51,6 +50,27 @@ func (s *StitchingService) stitch(ctx context.Context) {
 	}
 
 	for _, event := range events {
+		profile, err, found := s.repo.TryGetProfileByIdentifiers(ctx, event.EventIdentifier)
+		if err != nil {
+			fmt.Printf("Failed to get profile by identifiers, moving on to next event... %v: %v\n", event.EventIdentifier, err)
+			continue
+		}
+
+		if !found {
+			fmt.Printf("No profile found by identifiers %v, creating new profile...\n", event.EventIdentifier)
+			profile = db.Profile{
+				Cookie:    event.EventIdentifier.Cookie,
+				MessageId: event.EventIdentifier.MessageId,
+				Phone:     event.EventIdentifier.Phone,
+			}
+
+			err = s.repo.InsertProfile(ctx, profile)
+			if err != nil {
+				fmt.Printf("Failed to insert profile: %v\n", err)
+				continue
+			}
+		}
+		fmt.Printf("Stitched event: %v\n", profile)
 		if err := s.repo.MarkEventAsProcessed(ctx, event); err != nil {
 			fmt.Printf("Failed to mark event as stitched: %v\n", err)
 			continue
