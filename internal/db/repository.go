@@ -63,7 +63,7 @@ func (r *Repository) GetEventsCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-func (r *Repository) GetUnstitchedEvents(ctx context.Context, batchSize int) ([]EventRecord, error) {
+func (r *Repository) GetUnProcessedEvents(ctx context.Context, batchSize int) ([]EventRecord, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT 
 			event_id,
@@ -72,7 +72,7 @@ func (r *Repository) GetUnstitchedEvents(ctx context.Context, batchSize int) ([]
 			identifiers->>'message_id' as message_id,
 			identifiers->>'phone' as phone
 		FROM events 
-		WHERE stitched = false 
+		WHERE processed = false 
 		ORDER BY event_timestamp ASC 
 		LIMIT $1 
 		FOR UPDATE`, batchSize)
@@ -84,12 +84,12 @@ func (r *Repository) GetUnstitchedEvents(ctx context.Context, batchSize int) ([]
 	return pgx.CollectRows(rows, pgx.RowToStructByName[EventRecord])
 }
 
-func (r *Repository) MarkEventAsStitched(ctx context.Context, event EventRecord) error {
+func (r *Repository) MarkEventAsProcessed(ctx context.Context, event EventRecord) error {
 	_, err := r.pool.Exec(ctx,
-		"UPDATE events SET stitched = true WHERE event_id = $1 AND event_timestamp = $2",
+		"UPDATE events SET processed = true WHERE event_id = $1 AND event_timestamp = $2",
 		event.EventId, event.EventTimestamp)
 	if err != nil {
-		return fmt.Errorf("failed to mark event as stitched: %w", err)
+		return fmt.Errorf("failed to mark event as processed: %w", err)
 	}
 	return nil
 }

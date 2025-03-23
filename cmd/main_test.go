@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/tomashoffer/event-stitching/cmd/db"
+	"github.com/tomashoffer/event-stitching/internal"
+	"github.com/tomashoffer/event-stitching/internal/db"
 )
 
 func TestMain(t *testing.T) {
@@ -17,6 +19,9 @@ func TestMain(t *testing.T) {
 var _ = Describe("Event Record Insertion", func() {
 	var connPool *pgxpool.Pool
 	var repo *db.Repository
+	var ingestService *internal.EventIngestService
+	var ingestCtx context.Context
+	var cancelIngest context.CancelFunc
 
 	BeforeEach(func(ctx SpecContext) {
 		var err error
@@ -29,63 +34,59 @@ var _ = Describe("Event Record Insertion", func() {
 		_, err = connPool.Exec(ctx, "TRUNCATE TABLE events")
 		Expect(err).NotTo(HaveOccurred())
 
+		// Create a dedicated context for the ingest service
+		ingestCtx, cancelIngest = context.WithCancel(context.Background())
+		ingestService = internal.NewEventIngestService(repo, 2)
+		ingestService.Start(ingestCtx)
 	})
 
 	AfterEach(func() {
-		connPool.Close()
+		if cancelIngest != nil {
+			cancelIngest()
+		}
+		if connPool != nil {
+			connPool.Close()
+		}
 	})
 
 	It("should successfully insert single event record", func(ctx SpecContext) {
 		generatedEvent := db.GenerateRandomEvent()
-		eQueue := make(chan db.EventRecord, 1)
-		eQueue <- generatedEvent
-		close(eQueue)
 
-		// Start the storeData goroutine
-		go storeData(ctx, eQueue, repo)
+		ingestService.Queue <- generatedEvent
 
-		// Wait for the record to be inserted
-		Eventually(func() error {
-			// Verify there is exactly one record inserted
-			count, err := repo.GetEventsCount(ctx)
-			if err != nil {
-				return err
-			}
-			Expect(count).To(Equal(1))
+		// Wait for the record count to be 1
+		Eventually(func() (int, error) {
+			return repo.GetEventsCount(ctx)
+		}).WithContext(ctx).Should(Equal(1), "Expected exactly one event to be inserted")
 
-			// Verify the record contents
+		// Wait for and verify the record contents
+		Eventually(func() (db.EventRecord, error) {
 			events, err := repo.GetEvents(ctx)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(events[0].EventId).To(Equal(generatedEvent.EventId))
-			Expect(events[0].Cookie).To(Equal(generatedEvent.Cookie))
-			Expect(events[0].MessageId).To(Equal(generatedEvent.MessageId))
-			Expect(events[0].Phone).To(Equal(generatedEvent.Phone))
-
-			return nil
-		}, "5s").Should(Succeed())
+			if err != nil {
+				return db.EventRecord{}, err
+			}
+			if len(events) != 1 {
+				return db.EventRecord{}, nil
+			}
+			return events[0], nil
+		}).WithContext(ctx).Should(Equal(generatedEvent), "Expected event details to match")
 	})
 
 	It("should successfully insert 10 event records", func(ctx SpecContext) {
 		numOfEvents := 10
-		eQueue := make(chan db.EventRecord, numOfEvents)
 		insertedEvents := make([]db.EventRecord, numOfEvents)
 
 		for i := 0; i < numOfEvents; i++ {
 			insertedEvents[i] = db.GenerateRandomEvent()
-			eQueue <- insertedEvents[i]
+			ingestService.Queue <- insertedEvents[i]
 		}
-		close(eQueue)
-
-		// Start the storeData goroutine
-		go storeData(ctx, eQueue, repo)
 
 		Eventually(func() (int, error) {
 			return repo.GetEventsCount(ctx)
-		}).WithContext(ctx).Should(Equal(numOfEvents))
+		}).WithContext(ctx).Should(Equal(numOfEvents), "Expected all events to be inserted")
 
 		Eventually(func() ([]db.EventRecord, error) {
 			return repo.GetEvents(ctx)
-		}, "5s").WithContext(ctx).Should(HaveExactElements(insertedEvents))
+		}).WithContext(ctx).Should(ConsistOf(insertedEvents), "Expected all events to match")
 	})
 })
