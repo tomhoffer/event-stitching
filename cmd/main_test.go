@@ -36,7 +36,7 @@ var _ = Describe("Event Record Insertion", func() {
 	})
 
 	It("should successfully insert single event record", func(ctx SpecContext) {
-		generatedEvent := GenerateRandomEvent()
+		generatedEvent := db.GenerateRandomEvent()
 		eQueue := make(chan db.EventRecord, 1)
 		eQueue <- generatedEvent
 		close(eQueue)
@@ -72,7 +72,7 @@ var _ = Describe("Event Record Insertion", func() {
 		insertedEvents := make([]db.EventRecord, numOfEvents)
 
 		for i := 0; i < numOfEvents; i++ {
-			insertedEvents[i] = GenerateRandomEvent()
+			insertedEvents[i] = db.GenerateRandomEvent()
 			eQueue <- insertedEvents[i]
 		}
 		close(eQueue)

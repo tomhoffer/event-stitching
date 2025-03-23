@@ -3,27 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tomashoffer/event-stitching/cmd/db"
 )
-
-func GenerateRandomEvent() db.EventRecord {
-	return db.EventRecord{
-		EventIdentifier: db.EventIdentifier{
-			Cookie:    uuid.New().String(),
-			MessageId: uuid.New().String(),
-			Phone:     fmt.Sprintf("+1%09d", rand.Intn(1e9)),
-		},
-		EventId:        rand.Intn(1000),
-		EventTimestamp: time.Now().UTC().Add(time.Duration(rand.Intn(1000)) * time.Millisecond),
-	}
-}
 
 func storeData(ctx context.Context, queue <-chan db.EventRecord, repo *db.Repository) {
 	for {
@@ -62,7 +48,7 @@ func insertRecords(ctx context.Context, repo *db.Repository) {
 		}()
 	}
 	for i := 0; i < 100; i++ {
-		cQueue <- GenerateRandomEvent()
+		cQueue <- db.GenerateRandomEvent()
 	}
 
 	close(cQueue)
