@@ -52,25 +52,25 @@ var _ = Describe("Profile Repository", func() {
 			Phone:     "123456789",
 		}
 
-		err := tc.repo.InsertProfile(ctx, profile)
+		_, err := tc.repo.InsertProfile(ctx, profile)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Try to get profile by each identifier
-		retrievedProfile, err, found := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		retrievedProfile, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
 			Cookie: "test-cookie",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeTrue())
 		Expect(retrievedProfile).To(Equal(profile))
 
-		retrievedProfile, err, found = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		retrievedProfile, found, _, err = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
 			MessageId: "test-message",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeTrue())
 		Expect(retrievedProfile).To(Equal(profile))
 
-		retrievedProfile, err, found = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		retrievedProfile, found, _, err = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
 			Phone: "123456789",
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -78,40 +78,106 @@ var _ = Describe("Profile Repository", func() {
 		Expect(retrievedProfile).To(Equal(profile))
 	})
 
-	It("should update an existing profile", func(ctx SpecContext) {
-		originalProfile := db.Profile{
-			Cookie:    "original-cookie",
-			MessageId: "original-message",
-			Phone:     "123456789",
-		}
+	DescribeTable("should enrich profile data",
+		func(ctx SpecContext, originalProfile db.Profile, identifiers db.EventIdentifier, expectedProfile db.Profile) {
+			profileId, err := tc.repo.InsertProfile(ctx, originalProfile)
+			Expect(err).NotTo(HaveOccurred())
 
-		err := tc.repo.InsertProfile(ctx, originalProfile)
-		Expect(err).NotTo(HaveOccurred())
+			err = tc.repo.EnrichProfileByIdentifiers(ctx, profileId, identifiers)
+			Expect(err).NotTo(HaveOccurred())
 
-		updatedProfile := db.Profile{
-			Cookie:    "updated-cookie",
-			MessageId: "updated-message",
-			Phone:     "987654321",
-		}
-
-		// Get the profile ID (there is only one profile in the table)
-		var profileId int
-		err = tc.connPool.QueryRow(ctx, "SELECT id FROM profiles LIMIT 1").Scan(&profileId)
-		Expect(err).NotTo(HaveOccurred())
-
-		// Update the profile using the fetched ID
-		err = tc.repo.UpdateProfileById(ctx, profileId, updatedProfile)
-		Expect(err).NotTo(HaveOccurred())
-
-		// Verify the update using GetAllProfiles
-		profiles, err := tc.repo.GetAllProfiles(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(profiles).To(HaveLen(1))
-		Expect(profiles[0]).To(Equal(updatedProfile))
-	})
+			profiles, err := tc.repo.GetAllProfiles(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(profiles).To(HaveLen(1))
+			Expect(profiles[0]).To(Equal(expectedProfile))
+		},
+		Entry("update all fields",
+			db.Profile{
+				Cookie:    "original-cookie",
+				MessageId: "original-message",
+				Phone:     "123456789",
+			},
+			db.EventIdentifier{
+				Cookie:    "updated-cookie",
+				MessageId: "updated-message",
+				Phone:     "987654321",
+			},
+			db.Profile{
+				Cookie:    "updated-cookie",
+				MessageId: "updated-message",
+				Phone:     "987654321",
+			},
+		),
+		Entry("update single field",
+			db.Profile{
+				Cookie:    "original-cookie",
+				MessageId: "original-message",
+				Phone:     "123456789",
+			},
+			db.EventIdentifier{
+				Cookie:    "original-cookie",
+				MessageId: "updated-message",
+				Phone:     "123456789",
+			},
+			db.Profile{
+				Cookie:    "original-cookie",
+				MessageId: "updated-message",
+				Phone:     "123456789",
+			},
+		),
+		Entry("enrich with new identifier",
+			db.Profile{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "",
+			},
+			db.EventIdentifier{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			},
+			db.Profile{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			},
+		),
+		Entry("not enrich with empty identifier",
+			db.Profile{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			},
+			db.EventIdentifier{
+				Cookie:    "test-cookie",
+				MessageId: "",
+				Phone:     "",
+			},
+			db.Profile{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			},
+		),
+		Entry("not enrich with missing identifier",
+			db.Profile{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			},
+			db.EventIdentifier{
+				Cookie: "test-cookie",
+			},
+			db.Profile{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			},
+		),
+	)
 
 	It("should return not found for non-existent identifiers", func(ctx SpecContext) {
-		_, err, found := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		_, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
 			Cookie: "non-existent",
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -125,7 +191,7 @@ var _ = Describe("Profile Repository", func() {
 			Phone:     "123456789",
 		}
 
-		err := tc.repo.InsertProfile(ctx, profile)
+		_, err := tc.repo.InsertProfile(ctx, profile)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Test all possible combinations of identifiers
@@ -140,7 +206,7 @@ var _ = Describe("Profile Repository", func() {
 		}
 
 		for _, identifiers := range combinations {
-			retrievedProfile, err, found := tc.repo.TryGetProfileByIdentifiers(ctx, identifiers)
+			retrievedProfile, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, identifiers)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(found).To(BeTrue())
 			Expect(retrievedProfile).To(Equal(profile))
@@ -149,12 +215,12 @@ var _ = Describe("Profile Repository", func() {
 
 	It("should handle empty identifiers", func(ctx SpecContext) {
 		// Test with all empty identifiers
-		_, err, found := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{})
+		_, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeFalse())
 
 		// Test with all empty strings
-		_, err, found = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		_, found, _, err = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
 			Cookie:    "",
 			MessageId: "",
 			Phone:     "",
@@ -170,11 +236,11 @@ var _ = Describe("Profile Repository", func() {
 			Phone:     "",
 		}
 
-		err := tc.repo.InsertProfile(ctx, profile)
+		_, err := tc.repo.InsertProfile(ctx, profile)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Try to find profile using empty message_id and non-existent cookie
-		_, err, found := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		_, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
 			Cookie:    "non-existent-cookie",
 			MessageId: "",
 		})
@@ -182,7 +248,7 @@ var _ = Describe("Profile Repository", func() {
 		Expect(found).To(BeFalse())
 
 		// Try to find profile using empty phone and non-existent cookie
-		_, err, found = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		_, found, _, err = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
 			Cookie: "non-existent-cookie",
 			Phone:  "",
 		})
@@ -197,7 +263,7 @@ var _ = Describe("Profile Repository", func() {
 			Phone:     "123456789",
 		}
 
-		err := tc.repo.InsertProfile(ctx, profile)
+		_, err := tc.repo.InsertProfile(ctx, profile)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Test with different cases
@@ -209,7 +275,7 @@ var _ = Describe("Profile Repository", func() {
 		}
 
 		for _, identifiers := range combinations {
-			_, err, found := tc.repo.TryGetProfileByIdentifiers(ctx, identifiers)
+			_, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, identifiers)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(found).To(BeFalse())
 		}

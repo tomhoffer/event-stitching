@@ -135,4 +135,44 @@ var _ = Describe("Stitching Service", func() {
 		Expect(eventRepo.ProcessedEvents[0]).To(Equal(event))
 	})
 
+	It("should enrich the profile with the new identifier on event", func() {
+		existingProfile := db.Profile{
+			Cookie:    "test-cookie",
+			MessageId: "test-message",
+			Phone:     "",
+		}
+		_, err := profileRepo.InsertProfile(ctx, existingProfile)
+		Expect(err).NotTo(HaveOccurred())
+
+		event := db.EventRecord{
+			EventIdentifier: db.EventIdentifier{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			},
+		}
+		eventRepo.UnprocessedEvents = append(eventRepo.UnprocessedEvents, event)
+
+		stitchingSvc.Start(ctx)
+
+		// Verify existing profile was used and no other profiles were created
+		Eventually(func() ([]db.Profile, error) {
+			return profileRepo.GetAllProfiles(ctx)
+		}).Should(HaveLen(1))
+
+		profiles, err := profileRepo.GetAllProfiles(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(profiles[0]).To(Equal(db.Profile{
+			Cookie:    existingProfile.Cookie,
+			MessageId: existingProfile.MessageId,
+			Phone:     event.Phone,
+		}))
+
+		// Verify event was processed
+		Eventually(func() []db.EventRecord {
+			return eventRepo.ProcessedEvents
+		}).Should(HaveLen(1))
+		Expect(eventRepo.ProcessedEvents[0]).To(Equal(event))
+	})
+
 })

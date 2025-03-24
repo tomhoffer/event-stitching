@@ -7,42 +7,58 @@ import (
 )
 
 type MockProfileRepository struct {
-	Profiles []db.Profile
+	Profiles map[int]db.Profile
 }
 
 func NewMockProfileRepository() *MockProfileRepository {
 	return &MockProfileRepository{
-		Profiles: make([]db.Profile, 0),
+		Profiles: make(map[int]db.Profile),
 	}
 }
 
-func (m *MockProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, identifier db.EventIdentifier) (db.Profile, error, bool) {
-	for _, profile := range m.Profiles {
+func (m *MockProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, identifier db.EventIdentifier) (db.Profile, bool, int, error) {
+	for id, profile := range m.Profiles {
 		if identifier.Cookie != "" && profile.Cookie == identifier.Cookie {
-			return profile, nil, true
+			return profile, true, id, nil
 		}
 		if identifier.MessageId != "" && profile.MessageId == identifier.MessageId {
-			return profile, nil, true
+			return profile, true, id, nil
 		}
 		if identifier.Phone != "" && profile.Phone == identifier.Phone {
-			return profile, nil, true
+			return profile, true, id, nil
 		}
 	}
-	return db.Profile{}, nil, false
+	return db.Profile{}, false, 0, nil
 }
 
-func (m *MockProfileRepository) InsertProfile(ctx context.Context, profile db.Profile) error {
-	m.Profiles = append(m.Profiles, profile)
-	return nil
+func (m *MockProfileRepository) InsertProfile(ctx context.Context, profile db.Profile) (int, error) {
+	id := len(m.Profiles)
+	m.Profiles[id] = profile
+	return id, nil
 }
 
 func (m *MockProfileRepository) GetAllProfiles(ctx context.Context) ([]db.Profile, error) {
-	return m.Profiles, nil
+	profiles := make([]db.Profile, 0, len(m.Profiles))
+	for _, profile := range m.Profiles {
+		profiles = append(profiles, profile)
+	}
+	return profiles, nil
 }
 
 func (m *MockProfileRepository) UpdateProfileById(ctx context.Context, id int, profile db.Profile) error {
-	if id >= 0 && id < len(m.Profiles) {
+	if _, exists := m.Profiles[id]; exists {
 		m.Profiles[id] = profile
+		return nil
+	}
+	return nil
+}
+
+func (m *MockProfileRepository) EnrichProfileByIdentifiers(ctx context.Context, profileId int, identifier db.EventIdentifier) error {
+	if profile, exists := m.Profiles[profileId]; exists {
+		profile.Cookie = identifier.Cookie
+		profile.MessageId = identifier.MessageId
+		profile.Phone = identifier.Phone
+		m.Profiles[profileId] = profile
 		return nil
 	}
 	return nil

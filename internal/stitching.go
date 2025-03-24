@@ -52,7 +52,7 @@ func (s *StitchingService) stitch(ctx context.Context) {
 	}
 
 	for _, event := range events {
-		profile, err, found := s.profileRepo.TryGetProfileByIdentifiers(ctx, event.EventIdentifier)
+		profile, found, id, err := s.profileRepo.TryGetProfileByIdentifiers(ctx, event.EventIdentifier)
 		if err != nil {
 			fmt.Printf("Failed to get profile by identifiers, moving on to next event... %v: %v\n", event.EventIdentifier, err)
 			continue
@@ -66,16 +66,23 @@ func (s *StitchingService) stitch(ctx context.Context) {
 				Phone:     event.EventIdentifier.Phone,
 			}
 
-			err = s.profileRepo.InsertProfile(ctx, profile)
+			_, err = s.profileRepo.InsertProfile(ctx, profile)
 			if err != nil {
 				fmt.Printf("Failed to insert profile: %v\n", err)
 				continue
 			}
+		} else {
+			if err := s.profileRepo.EnrichProfileByIdentifiers(ctx, id, event.EventIdentifier); err != nil {
+				fmt.Printf("Failed to enrich profile: %v\n", err)
+				continue
+			}
 		}
-		fmt.Printf("Stitched event: %v\n", profile)
+
 		if err := s.eventRepo.MarkEventAsProcessed(ctx, event); err != nil {
 			fmt.Printf("Failed to mark event as stitched: %v\n", err)
 			continue
 		}
+		fmt.Printf("Stitched event: %v\n", profile)
+
 	}
 }

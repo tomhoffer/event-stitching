@@ -10,10 +10,11 @@ import (
 )
 
 type ProfileRepository interface {
-	TryGetProfileByIdentifiers(ctx context.Context, identifier EventIdentifier) (Profile, error, bool)
+	TryGetProfileByIdentifiers(ctx context.Context, identifier EventIdentifier) (profile Profile, found bool, id int, err error)
 	UpdateProfileById(ctx context.Context, id int, profile Profile) error
-	InsertProfile(ctx context.Context, profile Profile) error
+	InsertProfile(ctx context.Context, profile Profile) (id int, err error)
 	GetAllProfiles(ctx context.Context) ([]Profile, error)
+	EnrichProfileByIdentifiers(ctx context.Context, profileId int, identifier EventIdentifier) error
 }
 
 type PgProfileRepository struct {
@@ -24,27 +25,26 @@ func NewPgProfileRepository(pool *pgxpool.Pool) *PgProfileRepository {
 	return &PgProfileRepository{pool: pool}
 }
 
-func (r *PgProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, identifier EventIdentifier) (Profile, error, bool) {
-	getProfileByIdentifier := func(ctx context.Context, identifierName string, identifierVal string) (Profile, error, bool) {
+func (r *PgProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, identifier EventIdentifier) (profile Profile, found bool, id int, err error) {
+	getProfileByIdentifier := func(ctx context.Context, identifierName string, identifierVal string) (Profile, bool, int, error) {
 		if identifierVal == "" {
-			return Profile{}, nil, false
+			return Profile{}, false, 0, nil
 		}
 
 		identifierName = strings.ToLower(identifierName)
 		row := r.pool.QueryRow(ctx, `
-			SELECT cookie, message_id, phone 
-			FROM profiles 
-			WHERE `+identifierName+` = $1`, identifierVal)
+			SELECT * FROM profiles WHERE `+identifierName+` = $1`, identifierVal)
 
 		var profile Profile
-		err := row.Scan(&profile.Cookie, &profile.MessageId, &profile.Phone)
+		var profileId int
+		err := row.Scan(&profileId, &profile.Cookie, &profile.MessageId, &profile.Phone)
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return Profile{}, nil, false
+				return Profile{}, false, 0, nil
 			}
-			return Profile{}, fmt.Errorf("failed to get profile: %w", err), false
+			return Profile{}, false, 0, fmt.Errorf("failed to get profile: %w", err)
 		}
-		return profile, nil, true
+		return profile, true, profileId, nil
 	}
 
 	identifierNames := identifier.GetIdentifierNames()
@@ -53,18 +53,18 @@ func (r *PgProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, id
 		if !found {
 			continue
 		}
-		profile, err, found := getProfileByIdentifier(ctx, identifierName, identifierVal)
+		profile, found, profileId, err := getProfileByIdentifier(ctx, identifierName, identifierVal)
 		if err != nil {
-			return Profile{}, fmt.Errorf("failed to get profile by %s: %w", identifierName, err), false
+			return Profile{}, false, 0, fmt.Errorf("failed to get profile by %s: %w", identifierName, err)
 		}
 		if !found {
 			fmt.Printf("Profile not found by identifier: %v, trying next identifier...\n", identifierName)
 			continue
 		}
-		return profile, nil, true
+		return profile, true, profileId, nil
 	}
 	fmt.Printf("No profile found for any identifier: %v\n", identifier)
-	return Profile{}, nil, false
+	return Profile{}, false, 0, nil
 }
 
 func (r *PgProfileRepository) UpdateProfileById(ctx context.Context, id int, profile Profile) error {
@@ -77,14 +77,15 @@ func (r *PgProfileRepository) UpdateProfileById(ctx context.Context, id int, pro
 	return nil
 }
 
-func (r *PgProfileRepository) InsertProfile(ctx context.Context, profile Profile) error {
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO profiles (cookie, message_id, phone) VALUES ($1, $2, $3)`,
-		profile.Cookie, profile.MessageId, profile.Phone)
+func (r *PgProfileRepository) InsertProfile(ctx context.Context, profile Profile) (profileId int, err error) {
+	var id int
+	err = r.pool.QueryRow(ctx, `
+		INSERT INTO profiles (cookie, message_id, phone) VALUES ($1, $2, $3) RETURNING id`,
+		profile.Cookie, profile.MessageId, profile.Phone).Scan(&id)
 	if err != nil {
-		return fmt.Errorf("failed to insert profile: %w", err)
+		return 0, fmt.Errorf("failed to insert profile: %w", err)
 	}
-	return nil
+	return id, nil
 }
 
 func (r *PgProfileRepository) GetAllProfiles(ctx context.Context) ([]Profile, error) {
@@ -95,4 +96,19 @@ func (r *PgProfileRepository) GetAllProfiles(ctx context.Context) ([]Profile, er
 	defer rows.Close()
 
 	return pgx.CollectRows(rows, pgx.RowToStructByName[Profile])
+}
+
+func (r *PgProfileRepository) EnrichProfileByIdentifiers(ctx context.Context, profileId int, identifier EventIdentifier) error {
+	identifierNames := identifier.GetIdentifierNames()
+	for _, identifierName := range identifierNames {
+		identifierVal, found := identifier.GetIdentifierValueByName(identifierName)
+		if !found || identifierVal == "" {
+			continue
+		} // TODO group all updates into 1 query
+		_, err := r.pool.Exec(ctx, `UPDATE profiles SET `+identifierName+` = $1 WHERE id = $2`, identifierVal, profileId)
+		if err != nil {
+			return fmt.Errorf("failed to add identifier to profile: %w", err)
+		}
+	}
+	return nil
 }
