@@ -12,7 +12,7 @@ import (
 
 type eventTestContext struct {
 	connPool      *pgxpool.Pool
-	repo          *db.EventRepository
+	repo          *db.PgEventRepository
 	ingestService *internal.EventIngestService
 	ingestCtx     context.Context
 	cancelIngest  context.CancelFunc
@@ -25,7 +25,7 @@ func setupEventTest(ctx SpecContext, numWorkers int) *eventTestContext {
 	tc.connPool, err = pgxpool.New(ctx, "postgres://myuser:mypassword@localhost:5432/mydatabase")
 	Expect(err).NotTo(HaveOccurred())
 
-	tc.repo = db.NewEventRepository(tc.connPool)
+	tc.repo = db.NewPgEventRepository(tc.connPool)
 
 	// Clean up the database before each test
 	_, err = tc.connPool.Exec(ctx, "TRUNCATE TABLE events")

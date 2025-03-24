@@ -9,15 +9,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type ProfileRepository struct {
+type ProfileRepository interface {
+	TryGetProfileByIdentifiers(ctx context.Context, identifier EventIdentifier) (Profile, error, bool)
+	UpdateProfileById(ctx context.Context, id int, profile Profile) error
+	InsertProfile(ctx context.Context, profile Profile) error
+	GetAllProfiles(ctx context.Context) ([]Profile, error)
+}
+
+type PgProfileRepository struct {
 	pool *pgxpool.Pool
 }
 
-func NewProfileRepository(pool *pgxpool.Pool) *ProfileRepository {
-	return &ProfileRepository{pool: pool}
+func NewPgProfileRepository(pool *pgxpool.Pool) *PgProfileRepository {
+	return &PgProfileRepository{pool: pool}
 }
 
-func (r *ProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, identifier EventIdentifier) (Profile, error, bool) {
+func (r *PgProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, identifier EventIdentifier) (Profile, error, bool) {
 	getProfileByIdentifier := func(ctx context.Context, identifierName string, identifierVal string) (Profile, error, bool) {
 		if identifierVal == "" {
 			return Profile{}, nil, false
@@ -60,7 +67,7 @@ func (r *ProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, iden
 	return Profile{}, nil, false
 }
 
-func (r *ProfileRepository) UpdateProfileById(ctx context.Context, id int, profile Profile) error {
+func (r *PgProfileRepository) UpdateProfileById(ctx context.Context, id int, profile Profile) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE profiles SET cookie = $1, message_id = $2, phone = $3 WHERE id = $4`,
 		profile.Cookie, profile.MessageId, profile.Phone, id)
@@ -70,7 +77,7 @@ func (r *ProfileRepository) UpdateProfileById(ctx context.Context, id int, profi
 	return nil
 }
 
-func (r *ProfileRepository) InsertProfile(ctx context.Context, profile Profile) error {
+func (r *PgProfileRepository) InsertProfile(ctx context.Context, profile Profile) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO profiles (cookie, message_id, phone) VALUES ($1, $2, $3)`,
 		profile.Cookie, profile.MessageId, profile.Phone)
@@ -80,7 +87,7 @@ func (r *ProfileRepository) InsertProfile(ctx context.Context, profile Profile) 
 	return nil
 }
 
-func (r *ProfileRepository) GetAllProfiles(ctx context.Context) ([]Profile, error) {
+func (r *PgProfileRepository) GetAllProfiles(ctx context.Context) ([]Profile, error) {
 	rows, err := r.pool.Query(ctx, "SELECT cookie, message_id, phone FROM profiles")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query profiles: %w", err)

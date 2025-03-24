@@ -8,8 +8,8 @@ import (
 )
 
 type profileTestContext struct {
-	connPool *pgxpool.Pool
-	repo     *db.ProfileRepository
+	connPool *pgxpool.Pool // TODO: remove
+	repo     db.ProfileRepository
 }
 
 func setupProfileTest(ctx SpecContext) *profileTestContext {
@@ -19,7 +19,7 @@ func setupProfileTest(ctx SpecContext) *profileTestContext {
 	tc.connPool, err = pgxpool.New(ctx, "postgres://myuser:mypassword@localhost:5432/mydatabase")
 	Expect(err).NotTo(HaveOccurred())
 
-	tc.repo = db.NewProfileRepository(tc.connPool)
+	tc.repo = db.NewPgProfileRepository(tc.connPool)
 
 	// Clean up the database before each test
 	_, err = tc.connPool.Exec(ctx, "TRUNCATE TABLE profiles")

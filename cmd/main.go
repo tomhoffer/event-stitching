@@ -22,11 +22,12 @@ func main() {
 	}
 	defer connPool.Close()
 
-	repo := db.NewRepository(connPool)
+	eventRepo := db.NewPgEventRepository(connPool)
+	profileRepo := db.NewPgProfileRepository(connPool)
 
 	// Create and start services
-	ingestService := internal.NewEventIngestService(repo, 2)
-	stitchingService := internal.NewStitchingService(repo, 1*time.Second, 5, 100)
+	ingestService := internal.NewEventIngestService(eventRepo, 2)
+	stitchingService := internal.NewStitchingService(profileRepo, eventRepo, 1*time.Second, 5, 100)
 
 	ingestService.Start(ctx)
 	stitchingService.Start(ctx)

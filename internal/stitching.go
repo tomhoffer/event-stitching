@@ -9,14 +9,14 @@ import (
 )
 
 type StitchingService struct {
-	profileRepo       *db.ProfileRepository
-	eventRepo         *db.EventRepository
+	profileRepo       db.ProfileRepository
+	eventRepo         db.EventRepository
 	stitchingInterval time.Duration
 	numWorkers        int
 	batchSize         int
 }
 
-func NewStitchingService(profileRepo *db.ProfileRepository, eventRepo *db.EventRepository, stitchingInterval time.Duration, numWorkers, batchSize int) *StitchingService {
+func NewStitchingService(profileRepo db.ProfileRepository, eventRepo db.EventRepository, stitchingInterval time.Duration, numWorkers, batchSize int) *StitchingService {
 	return &StitchingService{
 		profileRepo:       profileRepo,
 		eventRepo:         eventRepo,
