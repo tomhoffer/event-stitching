@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -10,11 +11,12 @@ import (
 )
 
 type ProfileRepository interface {
-	TryGetProfileByIdentifiers(ctx context.Context, identifier EventIdentifier) (profile Profile, found bool, id int, err error)
+	TryGetProfilesByIdentifiers(ctx context.Context, identifier EventIdentifier) (profiles []Profile, found bool, ids []int, err error)
 	UpdateProfileById(ctx context.Context, id int, profile Profile) error
 	InsertProfile(ctx context.Context, profile Profile) (id int, err error)
 	GetAllProfiles(ctx context.Context) ([]Profile, error)
 	EnrichProfileByIdentifiers(ctx context.Context, profileId int, identifier EventIdentifier) error
+	MergeProfiles(ctx context.Context, profileIds []int) error
 }
 
 type PgProfileRepository struct {
@@ -25,7 +27,7 @@ func NewPgProfileRepository(pool *pgxpool.Pool) *PgProfileRepository {
 	return &PgProfileRepository{pool: pool}
 }
 
-func (r *PgProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, identifier EventIdentifier) (profile Profile, found bool, id int, err error) {
+func (r *PgProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, identifier EventIdentifier) (profiles []Profile, found bool, ids []int, err error) {
 	getProfileByIdentifier := func(ctx context.Context, identifierName string, identifierVal string) (Profile, bool, int, error) {
 		if identifierVal == "" {
 			return Profile{}, false, 0, nil
@@ -46,7 +48,9 @@ func (r *PgProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, id
 		}
 		return profile, true, profileId, nil
 	}
-
+	result := []Profile{}
+	profileIds := []int{}
+	profileFound := false
 	identifierNames := identifier.GetIdentifierNames()
 	for _, identifierName := range identifierNames {
 		identifierVal, found := identifier.GetIdentifierValueByName(identifierName)
@@ -55,16 +59,21 @@ func (r *PgProfileRepository) TryGetProfileByIdentifiers(ctx context.Context, id
 		}
 		profile, found, profileId, err := getProfileByIdentifier(ctx, identifierName, identifierVal)
 		if err != nil {
-			return Profile{}, false, 0, fmt.Errorf("failed to get profile by %s: %w", identifierName, err)
+			return result, profileFound, profileIds, fmt.Errorf("failed to get profile by %s: %w", identifierName, err)
 		}
 		if !found {
 			fmt.Printf("Profile not found by identifier: %v, trying next identifier...\n", identifierName)
 			continue
 		}
-		return profile, true, profileId, nil
+		result = append(result, profile)
+		profileIds = append(profileIds, profileId)
+		profileFound = true
 	}
-	fmt.Printf("No profile found for any identifier: %v\n", identifier)
-	return Profile{}, false, 0, nil
+
+	if len(result) == 0 {
+		fmt.Printf("No profile found for any identifier: %v\n", identifier)
+	}
+	return result, profileFound, profileIds, nil
 }
 
 func (r *PgProfileRepository) UpdateProfileById(ctx context.Context, id int, profile Profile) error {
@@ -110,5 +119,48 @@ func (r *PgProfileRepository) EnrichProfileByIdentifiers(ctx context.Context, pr
 			return fmt.Errorf("failed to add identifier to profile: %w", err)
 		}
 	}
+	return nil
+}
+
+// MergeProfiles merges multiple profiles into a single profile by:
+// 1. Taking the lexicographically lowest non-empty value for each field
+// 2. Updating the profile with the lowest ID with the merged values
+// 3. Deleting all other profiles
+//
+// The method ensures atomicity by performing all operations in a single SQL transaction.
+// Profile IDs are sorted to ensure consistent merging behavior.
+func (r *PgProfileRepository) MergeProfiles(ctx context.Context, profileIds []int) error {
+
+	// Sort profile IDs to ensure consistent merging
+	orderedIds := make([]int, len(profileIds))
+	copy(orderedIds, profileIds)
+	sort.Ints(orderedIds)
+
+	// Merge profiles and delete others in a single transaction
+	_, err := r.pool.Exec(ctx, `
+		WITH merged AS (
+			SELECT 
+				MIN(NULLIF(cookie, '')) as cookie,
+				MIN(NULLIF(message_id, '')) as message_id,
+				MIN(NULLIF(phone, '')) as phone
+			FROM profiles 
+			WHERE id = ANY($1)
+		),
+		updated AS (
+			UPDATE profiles 
+			SET 
+				cookie = COALESCE(merged.cookie, profiles.cookie),
+				message_id = COALESCE(merged.message_id, profiles.message_id),
+				phone = COALESCE(merged.phone, profiles.phone)
+			FROM merged
+			WHERE id = $2
+		)
+		DELETE FROM profiles 
+		WHERE id = ANY($1) AND id != $2`,
+		orderedIds, orderedIds[0])
+	if err != nil {
+		return fmt.Errorf("failed to merge and delete profiles: %w", err)
+	}
+
 	return nil
 }

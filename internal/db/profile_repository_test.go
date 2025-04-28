@@ -56,26 +56,26 @@ var _ = Describe("Profile Repository", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Try to get profile by each identifier
-		retrievedProfile, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		retrievedProfiles, found, _, err := tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{
 			Cookie: "test-cookie",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeTrue())
-		Expect(retrievedProfile).To(Equal(profile))
+		Expect(retrievedProfiles[0]).To(Equal(profile))
 
-		retrievedProfile, found, _, err = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		retrievedProfiles, found, _, err = tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{
 			MessageId: "test-message",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeTrue())
-		Expect(retrievedProfile).To(Equal(profile))
+		Expect(retrievedProfiles[0]).To(Equal(profile))
 
-		retrievedProfile, found, _, err = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		retrievedProfiles, found, _, err = tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{
 			Phone: "123456789",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeTrue())
-		Expect(retrievedProfile).To(Equal(profile))
+		Expect(retrievedProfiles[0]).To(Equal(profile))
 	})
 
 	DescribeTable("should enrich profile data",
@@ -177,7 +177,7 @@ var _ = Describe("Profile Repository", func() {
 	)
 
 	It("should return not found for non-existent identifiers", func(ctx SpecContext) {
-		_, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		_, found, _, err := tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{
 			Cookie: "non-existent",
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -206,21 +206,21 @@ var _ = Describe("Profile Repository", func() {
 		}
 
 		for _, identifiers := range combinations {
-			retrievedProfile, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, identifiers)
+			retrievedProfiles, found, _, err := tc.repo.TryGetProfilesByIdentifiers(ctx, identifiers)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(found).To(BeTrue())
-			Expect(retrievedProfile).To(Equal(profile))
+			Expect(retrievedProfiles[0]).To(Equal(profile))
 		}
 	})
 
 	It("should handle empty identifiers", func(ctx SpecContext) {
 		// Test with all empty identifiers
-		_, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{})
+		_, found, _, err := tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeFalse())
 
 		// Test with all empty strings
-		_, found, _, err = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		_, found, _, err = tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{
 			Cookie:    "",
 			MessageId: "",
 			Phone:     "",
@@ -240,7 +240,7 @@ var _ = Describe("Profile Repository", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Try to find profile using empty message_id and non-existent cookie
-		_, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		_, found, _, err := tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{
 			Cookie:    "non-existent-cookie",
 			MessageId: "",
 		})
@@ -248,7 +248,7 @@ var _ = Describe("Profile Repository", func() {
 		Expect(found).To(BeFalse())
 
 		// Try to find profile using empty phone and non-existent cookie
-		_, found, _, err = tc.repo.TryGetProfileByIdentifiers(ctx, db.EventIdentifier{
+		_, found, _, err = tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{
 			Cookie: "non-existent-cookie",
 			Phone:  "",
 		})
@@ -275,9 +275,109 @@ var _ = Describe("Profile Repository", func() {
 		}
 
 		for _, identifiers := range combinations {
-			_, found, _, err := tc.repo.TryGetProfileByIdentifiers(ctx, identifiers)
+			_, found, _, err := tc.repo.TryGetProfilesByIdentifiers(ctx, identifiers)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(found).To(BeFalse())
 		}
+	})
+
+	Describe("Profile Merging", func() {
+		It("should merge profiles and keep the lowest values", func(ctx SpecContext) {
+			// Create first profile
+			profile1 := db.Profile{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			}
+			profile1Id, err := tc.repo.InsertProfile(ctx, profile1)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create second profile with different values
+			profile2 := db.Profile{
+				Cookie:    "a-cookie",  // Lower value
+				MessageId: "a-message", // Lower value
+				Phone:     "987654321",
+			}
+			profile2Id, err := tc.repo.InsertProfile(ctx, profile2)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Merge profiles
+			err = tc.repo.MergeProfiles(ctx, []int{profile1Id, profile2Id})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify only one profile remains
+			profiles, err := tc.repo.GetAllProfiles(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(profiles).To(HaveLen(1))
+
+			// Verify merged profile has the lowest values
+			Expect(profiles[0]).To(Equal(db.Profile{
+				Cookie:    "a-cookie",
+				MessageId: "a-message",
+				Phone:     "123456789",
+			}))
+		})
+
+		It("should preserve non-empty values when merging", func(ctx SpecContext) {
+			// Create first profile with some empty values
+			profile1 := db.Profile{
+				Cookie:    "test-cookie",
+				MessageId: "",
+				Phone:     "123456789",
+			}
+			profile1Id, err := tc.repo.InsertProfile(ctx, profile1)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create second profile with different values
+			profile2 := db.Profile{
+				Cookie:    "",
+				MessageId: "test-message",
+				Phone:     "",
+			}
+			profile2Id, err := tc.repo.InsertProfile(ctx, profile2)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Merge profiles
+			err = tc.repo.MergeProfiles(ctx, []int{profile1Id, profile2Id})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify merged profile preserves non-empty values
+			profiles, err := tc.repo.GetAllProfiles(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(profiles[0]).To(Equal(db.Profile{
+				Cookie:    "test-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			}))
+		})
+
+		It("should handle merging multiple profiles", func(ctx SpecContext) {
+			// Create three profiles with different values
+			profiles := []db.Profile{
+				{Cookie: "c-cookie", MessageId: "c-message", Phone: "123456789"},
+				{Cookie: "b-cookie", MessageId: "b-message", Phone: "987654321"},
+				{Cookie: "a-cookie", MessageId: "a-message", Phone: "456789123"},
+			}
+
+			profileIds := make([]int, len(profiles))
+			for i, profile := range profiles {
+				id, err := tc.repo.InsertProfile(ctx, profile)
+				Expect(err).NotTo(HaveOccurred())
+				profileIds[i] = id
+			}
+
+			// Merge profiles
+			err := tc.repo.MergeProfiles(ctx, profileIds)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify merged profile has the lowest values
+			mergedProfiles, err := tc.repo.GetAllProfiles(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mergedProfiles[0]).To(Equal(db.Profile{
+				Cookie:    "a-cookie",
+				MessageId: "a-message",
+				Phone:     "123456789",
+			}))
+		})
 	})
 })

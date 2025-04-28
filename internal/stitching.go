@@ -52,7 +52,7 @@ func (s *StitchingService) stitch(ctx context.Context) {
 	}
 
 	for _, event := range events {
-		profile, found, id, err := s.profileRepo.TryGetProfileByIdentifiers(ctx, event.EventIdentifier)
+		profiles, found, profileIds, err := s.profileRepo.TryGetProfilesByIdentifiers(ctx, event.EventIdentifier)
 		if err != nil {
 			fmt.Printf("Failed to get profile by identifiers, moving on to next event... %v: %v\n", event.EventIdentifier, err)
 			continue
@@ -60,29 +60,36 @@ func (s *StitchingService) stitch(ctx context.Context) {
 
 		if !found {
 			fmt.Printf("No profile found by identifiers %v, creating new profile...\n", event.EventIdentifier)
-			profile = db.Profile{
+			p := db.Profile{
 				Cookie:    event.EventIdentifier.Cookie,
 				MessageId: event.EventIdentifier.MessageId,
 				Phone:     event.EventIdentifier.Phone,
 			}
 
-			_, err = s.profileRepo.InsertProfile(ctx, profile)
+			_, err = s.profileRepo.InsertProfile(ctx, p)
 			if err != nil {
 				fmt.Printf("Failed to insert profile: %v\n", err)
 				continue
 			}
 		} else {
-			if err := s.profileRepo.EnrichProfileByIdentifiers(ctx, id, event.EventIdentifier); err != nil {
-				fmt.Printf("Failed to enrich profile: %v\n", err)
-				continue
+			// At least one profile was found
+			if len(profiles) == 1 {
+				if err := s.profileRepo.EnrichProfileByIdentifiers(ctx, profileIds[0], event.EventIdentifier); err != nil {
+					fmt.Printf("Failed to enrich profile: %v\n", err)
+					continue
+				}
+			} else {
+				// Merge profiles if more than one was found
+				s.profileRepo.MergeProfiles(ctx, profileIds)
 			}
+
 		}
 
 		if err := s.eventRepo.MarkEventAsProcessed(ctx, event); err != nil {
-			fmt.Printf("Failed to mark event as stitched: %v\n", err)
+			fmt.Printf("Failed to mark event as processed: %v\n", err)
 			continue
 		}
-		fmt.Printf("Stitched event: %v\n", profile)
+		fmt.Printf("Processed event: %v\n", event)
 
 	}
 }
