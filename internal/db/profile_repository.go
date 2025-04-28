@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,7 +12,7 @@ import (
 )
 
 type ProfileRepository interface {
-	TryGetProfilesByIdentifiers(ctx context.Context, identifier EventIdentifier) (profiles []Profile, found bool, ids []int, err error)
+	TryGetProfilesByIdentifiers(ctx context.Context, identifier EventIdentifier) (profiles []Profile, found bool, err error)
 	UpdateProfileById(ctx context.Context, id int, profile Profile) error
 	InsertProfile(ctx context.Context, profile Profile) (id int, err error)
 	GetAllProfiles(ctx context.Context) ([]Profile, error)
@@ -27,29 +28,29 @@ func NewPgProfileRepository(pool *pgxpool.Pool) *PgProfileRepository {
 	return &PgProfileRepository{pool: pool}
 }
 
-func (r *PgProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, identifier EventIdentifier) (profiles []Profile, found bool, ids []int, err error) {
-	getProfileByIdentifier := func(ctx context.Context, identifierName string, identifierVal string) (Profile, bool, int, error) {
-		if identifierVal == "" {
-			return Profile{}, false, 0, nil
-		}
+func (r *PgProfileRepository) getProfileByIdentifier(ctx context.Context, identifierName string, identifierVal string) (Profile, bool, error) {
+	if identifierVal == "" {
+		return Profile{}, false, nil
+	}
 
-		identifierName = strings.ToLower(identifierName)
-		row := r.pool.QueryRow(ctx, `
+	identifierName = strings.ToLower(identifierName)
+	row := r.pool.QueryRow(ctx, `
 			SELECT * FROM profiles WHERE `+identifierName+` = $1`, identifierVal)
 
-		var profile Profile
-		var profileId int
-		err := row.Scan(&profileId, &profile.Cookie, &profile.MessageId, &profile.Phone)
-		if err != nil {
-			if err == pgx.ErrNoRows {
-				return Profile{}, false, 0, nil
-			}
-			return Profile{}, false, 0, fmt.Errorf("failed to get profile: %w", err)
+	var profile Profile
+	var profileId int
+	err := row.Scan(&profileId, &profile.Cookie, &profile.MessageId, &profile.Phone)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Profile{}, false, nil
 		}
-		return profile, true, profileId, nil
+		return Profile{}, false, fmt.Errorf("failed to get profile: %w", err)
 	}
-	result := []Profile{}
-	profileIds := []int{}
+	return profile, true, nil
+}
+
+func (r *PgProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, identifier EventIdentifier) (profiles []Profile, found bool, err error) {
+	var result []Profile
 	profileFound := false
 	identifierNames := identifier.GetIdentifierNames()
 	for _, identifierName := range identifierNames {
@@ -57,23 +58,22 @@ func (r *PgProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, i
 		if !found {
 			continue
 		}
-		profile, found, profileId, err := getProfileByIdentifier(ctx, identifierName, identifierVal)
+		profile, found, err := r.getProfileByIdentifier(ctx, identifierName, identifierVal)
 		if err != nil {
-			return result, profileFound, profileIds, fmt.Errorf("failed to get profile by %s: %w", identifierName, err)
+			return result, profileFound, fmt.Errorf("failed to get profile by %s: %w", identifierName, err)
 		}
 		if !found {
 			fmt.Printf("Profile not found by identifier: %v, trying next identifier...\n", identifierName)
 			continue
 		}
 		result = append(result, profile)
-		profileIds = append(profileIds, profileId)
 		profileFound = true
 	}
 
 	if len(result) == 0 {
 		fmt.Printf("No profile found for any identifier: %v\n", identifier)
 	}
-	return result, profileFound, profileIds, nil
+	return result, profileFound, nil
 }
 
 func (r *PgProfileRepository) UpdateProfileById(ctx context.Context, id int, profile Profile) error {
@@ -98,7 +98,7 @@ func (r *PgProfileRepository) InsertProfile(ctx context.Context, profile Profile
 }
 
 func (r *PgProfileRepository) GetAllProfiles(ctx context.Context) ([]Profile, error) {
-	rows, err := r.pool.Query(ctx, "SELECT cookie, message_id, phone FROM profiles")
+	rows, err := r.pool.Query(ctx, "SELECT * FROM profiles")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query profiles: %w", err)
 	}

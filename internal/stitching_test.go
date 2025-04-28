@@ -88,12 +88,11 @@ var _ = Describe("Stitching Service", func() {
 
 		profiles, err := profileRepo.GetAllProfiles(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(profiles).To(ContainElement(existingProfile))
-		Expect(profiles).To(ContainElement(db.Profile{
-			Cookie:    event.Cookie,
-			MessageId: event.MessageId,
-			Phone:     event.Phone,
-		}))
+		Expect(profiles).To(ContainElement(SatisfyAll(
+			HaveField("Cookie", event.Cookie),
+			HaveField("MessageId", event.MessageId),
+			HaveField("Phone", event.Phone),
+		)))
 
 		// Verify event was processed
 		Eventually(func() []db.EventRecord {

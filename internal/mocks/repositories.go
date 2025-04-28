@@ -18,36 +18,33 @@ func NewMockProfileRepository() *MockProfileRepository {
 	}
 }
 
-func (m *MockProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, identifier db.EventIdentifier) ([]db.Profile, bool, []int, error) {
-	profiles := []db.Profile{}
-	ids := []int{}
+func (m *MockProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, identifier db.EventIdentifier) ([]db.Profile, bool, error) {
+	var profiles []db.Profile
 	found := false
 
-	for id, profile := range m.Profiles {
+	for _, profile := range m.Profiles {
 		if identifier.Cookie != "" && profile.Cookie == identifier.Cookie {
 			profiles = append(profiles, profile)
-			ids = append(ids, id)
 			found = true
 			continue
 		}
 		if identifier.MessageId != "" && profile.MessageId == identifier.MessageId {
 			profiles = append(profiles, profile)
-			ids = append(ids, id)
 			found = true
 			continue
 		}
 		if identifier.Phone != "" && profile.Phone == identifier.Phone {
 			profiles = append(profiles, profile)
-			ids = append(ids, id)
 			found = true
 			continue
 		}
 	}
-	return profiles, found, ids, nil
+	return profiles, found, nil
 }
 
 func (m *MockProfileRepository) InsertProfile(ctx context.Context, profile db.Profile) (int, error) {
 	id := len(m.Profiles)
+	profile.Id = id
 	m.Profiles[id] = profile
 	return id, nil
 }

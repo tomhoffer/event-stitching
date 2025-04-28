@@ -63,6 +63,7 @@ func GenerateRandomEvent() EventRecord {
 }
 
 type Profile struct {
+	Id        int    `db:"id"`
 	Cookie    string `db:"cookie"`
 	MessageId string `db:"message_id"`
 	Phone     string `db:"phone"`

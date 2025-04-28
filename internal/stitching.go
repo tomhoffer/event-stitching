@@ -52,7 +52,7 @@ func (s *StitchingService) stitch(ctx context.Context) {
 	}
 
 	for _, event := range events {
-		profiles, found, profileIds, err := s.profileRepo.TryGetProfilesByIdentifiers(ctx, event.EventIdentifier)
+		profiles, found, err := s.profileRepo.TryGetProfilesByIdentifiers(ctx, event.EventIdentifier)
 		if err != nil {
 			fmt.Printf("Failed to get profile by identifiers, moving on to next event... %v: %v\n", event.EventIdentifier, err)
 			continue
@@ -74,12 +74,16 @@ func (s *StitchingService) stitch(ctx context.Context) {
 		} else {
 			// At least one profile was found
 			if len(profiles) == 1 {
-				if err := s.profileRepo.EnrichProfileByIdentifiers(ctx, profileIds[0], event.EventIdentifier); err != nil {
+				if err := s.profileRepo.EnrichProfileByIdentifiers(ctx, profiles[0].Id, event.EventIdentifier); err != nil {
 					fmt.Printf("Failed to enrich profile: %v\n", err)
 					continue
 				}
 			} else {
 				// Merge profiles if more than one was found
+				profileIds := make([]int, len(profiles))
+				for i, profile := range profiles {
+					profileIds[i] = profile.Id
+				}
 				s.profileRepo.MergeProfiles(ctx, profileIds)
 			}
 
