@@ -7,12 +7,14 @@ import (
 )
 
 type MockProfileRepository struct {
-	Profiles map[int]db.Profile
+	Profiles   map[int]db.Profile
+	MergeCalls [][]int
 }
 
 func NewMockProfileRepository() *MockProfileRepository {
 	return &MockProfileRepository{
-		Profiles: make(map[int]db.Profile),
+		Profiles:   make(map[int]db.Profile),
+		MergeCalls: make([][]int, 0),
 	}
 }
 
@@ -26,16 +28,19 @@ func (m *MockProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context,
 			profiles = append(profiles, profile)
 			ids = append(ids, id)
 			found = true
+			continue
 		}
 		if identifier.MessageId != "" && profile.MessageId == identifier.MessageId {
 			profiles = append(profiles, profile)
 			ids = append(ids, id)
 			found = true
+			continue
 		}
 		if identifier.Phone != "" && profile.Phone == identifier.Phone {
 			profiles = append(profiles, profile)
 			ids = append(ids, id)
 			found = true
+			continue
 		}
 	}
 	return profiles, found, ids, nil
@@ -75,6 +80,7 @@ func (m *MockProfileRepository) EnrichProfileByIdentifiers(ctx context.Context, 
 }
 
 func (m *MockProfileRepository) MergeProfiles(ctx context.Context, profileIds []int) error {
+	m.MergeCalls = append(m.MergeCalls, profileIds)
 	return nil
 }
 

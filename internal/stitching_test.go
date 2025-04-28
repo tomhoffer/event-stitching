@@ -159,14 +159,9 @@ var _ = Describe("Stitching Service", func() {
 		Eventually(func() ([]db.Profile, error) {
 			return profileRepo.GetAllProfiles(ctx)
 		}).Should(HaveLen(1))
-
-		profiles, err := profileRepo.GetAllProfiles(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(profiles[0]).To(Equal(db.Profile{
-			Cookie:    existingProfile.Cookie,
-			MessageId: existingProfile.MessageId,
-			Phone:     event.Phone,
-		}))
+		Eventually(func() ([]db.Profile, error) {
+			return profileRepo.GetAllProfiles(ctx)
+		}).Should(Equal([]db.Profile{existingProfile}))
 
 		// Verify event was processed
 		Eventually(func() []db.EventRecord {
@@ -175,4 +170,46 @@ var _ = Describe("Stitching Service", func() {
 		Expect(eventRepo.ProcessedEvents[0]).To(Equal(event))
 	})
 
+	It("should trigger profile merge on event with common identifiers", func(ctx SpecContext) {
+
+		profile1 := db.Profile{
+			Cookie:    "test-cookie",
+			MessageId: "test-message",
+			Phone:     "",
+		}
+		profile1Id, err := profileRepo.InsertProfile(ctx, profile1)
+		Expect(err).NotTo(HaveOccurred())
+
+		profile2 := db.Profile{
+			Cookie:    "different-cookie",
+			MessageId: "different-message", // Common identifier
+			Phone:     "123456789",
+		}
+		profile2Id, err := profileRepo.InsertProfile(ctx, profile2)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create an event that should trigger profile merging
+		event := db.EventRecord{
+			EventIdentifier: db.EventIdentifier{
+				Cookie:    "different-cookie",
+				MessageId: "test-message",
+				Phone:     "123456789",
+			},
+		}
+		err = eventRepo.InsertEvent(ctx, event)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Process the event
+		stitchingSvc.Start(ctx)
+
+		// Verify MergeProfiles was called with the correct profile IDs
+		Eventually(func() [][]int {
+			return profileRepo.MergeCalls
+		}, "5s").Should(ContainElement([]int{profile1Id, profile2Id}), "MergeProfiles should be called with correct profile IDs")
+
+		// Verify the event was processed
+		Eventually(func() ([]db.EventRecord, error) {
+			return eventRepo.GetEvents(ctx)
+		}, "5s").Should(HaveLen(1))
+	})
 })
