@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/tomashoffer/event-stitching/internal/tools"
 	"os"
 	"time"
 
@@ -12,29 +13,49 @@ import (
 )
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	connPool, err := pgxpool.New(ctx, "postgres://myuser:mypassword@localhost:5432/mydatabase")
+	defer connPool.Close()
 	if err != nil {
 		fmt.Printf("Unable to connect: %v\n", err)
 		os.Exit(1)
 	}
-	defer connPool.Close()
+
+	if err := tools.ResetDB(ctx, connPool); err != nil {
+		fmt.Printf("Failed to reset database: %v\n", err)
+		os.Exit(1)
+	}
 
 	eventRepo := db.NewPgEventRepository(connPool)
 	profileRepo := db.NewPgProfileRepository(connPool)
 
 	// Create and start services
-	ingestService := internal.NewEventIngestService(eventRepo, 2)
-	stitchingService := internal.NewStitchingService(profileRepo, eventRepo, 1*time.Second, 5, 100)
+	ingestService := internal.NewEventIngestService(eventRepo, 1)
+	stitchingService := internal.NewStitchingService(profileRepo, eventRepo, 100*time.Millisecond, 1, 100)
 
 	ingestService.Start(ctx)
 	stitchingService.Start(ctx)
 
 	// Generate and ingest test events
-	GenerateEvents(ctx, 1000, ingestService)
+	startTime := time.Now()
+	GenerateEvents(ctx, 10_000, ingestService)
 
-	// Wait for context to be done
-	<-ctx.Done()
+	// Wait for all events to be processed
+	time.Sleep(1 * time.Second)
+	for {
+		unprocessed, err := eventRepo.GetUnProcessedEvents(ctx, 1)
+		if err != nil {
+			fmt.Printf("Error getting unprocessed events: %v\n", err)
+		}
+		if len(unprocessed) == 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	duration := time.Since(startTime)
+	totalEvents, err := eventRepo.GetEventsCount(ctx)
+	fmt.Printf("All %d events processed in %v\n", totalEvents, duration)
 }

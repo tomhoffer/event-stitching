@@ -31,14 +31,10 @@ cd event-stitching
 go test ./...
 ```
 
-4. Run the service:
+4. Run the service & the benchmark:
 ```bash
 go run cmd/main.go
 ```
-
-## Configuration
-
-TODO
 
 ## License
 
