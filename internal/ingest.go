@@ -2,7 +2,7 @@ package internal
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 
 	"github.com/tomashoffer/event-stitching/internal/db"
 )
@@ -11,6 +11,7 @@ type EventIngestService struct {
 	repo       db.EventRepository
 	numWorkers int
 	Queue      chan db.EventRecord
+	log        *slog.Logger
 }
 
 func NewEventIngestService(repo db.EventRepository, numWorkers int) *EventIngestService {
@@ -18,6 +19,7 @@ func NewEventIngestService(repo db.EventRepository, numWorkers int) *EventIngest
 		repo:       repo,
 		numWorkers: numWorkers,
 		Queue:      make(chan db.EventRecord, 1000),
+		log:        slog.Default(),
 	}
 }
 
@@ -37,10 +39,10 @@ func (s *EventIngestService) IngestWorker(ctx context.Context) {
 				return
 			}
 			if err := s.repo.InsertEvent(ctx, event); err != nil {
-				fmt.Printf("Failed to insert data: %v\n", err)
+				s.log.Error("Failed to insert data", "error", err)
 				continue
 			}
-			fmt.Println("Insert successful")
+			s.log.Debug("Insert successful")
 		}
 	}
 }

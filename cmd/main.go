@@ -2,29 +2,32 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"github.com/tomashoffer/event-stitching/internal/tools"
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tomashoffer/event-stitching/internal"
 	"github.com/tomashoffer/event-stitching/internal/db"
+	"github.com/tomashoffer/event-stitching/internal/logger"
+	"github.com/tomashoffer/event-stitching/internal/tools"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	log := logger.NewLogger(slog.LevelInfo)
+
 	connPool, err := pgxpool.New(ctx, "postgres://myuser:mypassword@localhost:5432/mydatabase")
 	defer connPool.Close()
 	if err != nil {
-		fmt.Printf("Unable to connect: %v\n", err)
+		log.Error("Unable to connect", "error", err)
 		os.Exit(1)
 	}
 
 	if err := tools.ResetDB(ctx, connPool); err != nil {
-		fmt.Printf("Failed to reset database: %v\n", err)
+		log.Error("Failed to reset database", "error", err)
 		os.Exit(1)
 	}
 
@@ -33,7 +36,7 @@ func main() {
 
 	// Create and start services
 	ingestService := internal.NewEventIngestService(eventRepo, 1)
-	stitchingService := internal.NewStitchingService(profileRepo, eventRepo, 100*time.Millisecond, 1, 100)
+	stitchingService := internal.NewStitchingService(profileRepo, eventRepo, 100*time.Millisecond, 5, 100)
 
 	ingestService.Start(ctx)
 	stitchingService.Start(ctx)
@@ -47,7 +50,7 @@ func main() {
 	for {
 		unprocessed, err := eventRepo.GetUnProcessedEvents(ctx, 1)
 		if err != nil {
-			fmt.Printf("Error getting unprocessed events: %v\n", err)
+			log.Error("Error getting unprocessed events", "error", err)
 		}
 		if len(unprocessed) == 0 {
 			break
@@ -57,5 +60,5 @@ func main() {
 
 	duration := time.Since(startTime)
 	totalEvents, err := eventRepo.GetEventsCount(ctx)
-	fmt.Printf("All %d events processed in %v\n", totalEvents, duration)
+	log.Info("All events processed", "count", totalEvents, "duration", duration)
 }

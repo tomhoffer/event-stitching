@@ -2,7 +2,7 @@ package internal
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/tomashoffer/event-stitching/internal/db"
@@ -14,6 +14,7 @@ type StitchingService struct {
 	stitchingInterval time.Duration
 	numWorkers        int
 	batchSize         int
+	log               *slog.Logger
 }
 
 func NewStitchingService(profileRepo db.ProfileRepository, eventRepo db.EventRepository, stitchingInterval time.Duration, numWorkers, batchSize int) *StitchingService {
@@ -23,6 +24,7 @@ func NewStitchingService(profileRepo db.ProfileRepository, eventRepo db.EventRep
 		stitchingInterval: stitchingInterval,
 		numWorkers:        numWorkers,
 		batchSize:         batchSize,
+		log:               slog.Default(),
 	}
 }
 
@@ -47,19 +49,22 @@ func (s *StitchingService) stitchWorker(ctx context.Context) {
 func (s *StitchingService) stitch(ctx context.Context) {
 	events, err := s.eventRepo.GetUnProcessedEvents(ctx, s.batchSize)
 	if err != nil {
-		fmt.Printf("Failed to query unstitched events: %v\n", err)
+		s.log.Error("Failed to query unstitched events", "error", err)
 		return
 	}
 
 	for _, event := range events {
 		profiles, found, err := s.profileRepo.TryGetProfilesByIdentifiers(ctx, event.EventIdentifier)
 		if err != nil {
-			fmt.Printf("Failed to get profile by identifiers, moving on to next event... %v: %v\n", event.EventIdentifier, err)
+			s.log.Warn("Failed to get profile by identifiers, moving on to next event",
+				"identifiers", event.EventIdentifier,
+				"error", err)
 			continue
 		}
 
 		if !found {
-			fmt.Printf("No profile found by identifiers %v, creating new profile...\n", event.EventIdentifier)
+			s.log.Debug("No profile found by identifiers, creating new profile",
+				"identifiers", event.EventIdentifier)
 			p := db.Profile{
 				Cookie:    event.EventIdentifier.Cookie,
 				MessageId: event.EventIdentifier.MessageId,
@@ -68,14 +73,14 @@ func (s *StitchingService) stitch(ctx context.Context) {
 
 			_, err = s.profileRepo.InsertProfile(ctx, p)
 			if err != nil {
-				fmt.Printf("Failed to insert profile: %v\n", err)
+				s.log.Error("Failed to insert profile", "error", err)
 				continue
 			}
 		} else {
 			// At least one profile was found
 			if len(profiles) == 1 {
 				if err := s.profileRepo.EnrichProfileByIdentifiers(ctx, profiles[0].Id, event.EventIdentifier); err != nil {
-					fmt.Printf("Failed to enrich profile: %v\n", err)
+					s.log.Error("Failed to enrich profile", "error", err)
 					continue
 				}
 			} else {
@@ -86,14 +91,12 @@ func (s *StitchingService) stitch(ctx context.Context) {
 				}
 				s.profileRepo.MergeProfiles(ctx, profileIds)
 			}
-
 		}
 
 		if err := s.eventRepo.MarkEventAsProcessed(ctx, event); err != nil {
-			fmt.Printf("Failed to mark event as processed: %v\n", err)
+			s.log.Error("Failed to mark event as processed", "error", err)
 			continue
 		}
-		fmt.Printf("Processed event: %v\n", event)
-
+		s.log.Debug("Processed event", "event", event)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -22,10 +23,14 @@ type ProfileRepository interface {
 
 type PgProfileRepository struct {
 	pool *pgxpool.Pool
+	log  *slog.Logger
 }
 
 func NewPgProfileRepository(pool *pgxpool.Pool) *PgProfileRepository {
-	return &PgProfileRepository{pool: pool}
+	return &PgProfileRepository{
+		pool: pool,
+		log:  slog.Default(),
+	}
 }
 
 func (r *PgProfileRepository) getProfileByIdentifier(ctx context.Context, identifierName string, identifierVal string) (Profile, bool, error) {
@@ -63,7 +68,9 @@ func (r *PgProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, i
 			return result, profileFound, fmt.Errorf("failed to get profile by %s: %w", identifierName, err)
 		}
 		if !found {
-			fmt.Printf("Profile not found by identifier: %v, trying next identifier...\n", identifierName)
+			r.log.Debug("Profile not found by identifier, trying next identifier",
+				"identifier", identifierName,
+				"value", identifierVal)
 			continue
 		}
 		result = append(result, profile)
@@ -71,7 +78,7 @@ func (r *PgProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, i
 	}
 
 	if len(result) == 0 {
-		fmt.Printf("No profile found for any identifier: %v\n", identifier)
+		r.log.Debug("No profile found for any identifier", "identifier", identifier)
 	}
 	return result, profileFound, nil
 }
