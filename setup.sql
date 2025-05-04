@@ -6,5 +6,11 @@ CREATE TABLE events (
     event_timestamp TIMESTAMP,
     identifiers JSONB,
     processed BOOLEAN DEFAULT FALSE
-)
+);
 
+
+CREATE INDEX idx_profiles_phone ON profiles(phone);
+CREATE INDEX idx_profiles_message_id ON profiles(message_id);
+CREATE INDEX idx_profiles_cookie ON profiles(cookie);
+
+CREATE INDEX idx_events_processed_timestamp ON events(processed, event_timestamp);
