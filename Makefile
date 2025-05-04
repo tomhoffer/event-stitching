@@ -8,7 +8,7 @@ test:
 # Run benchmarks with profiling
 profile:
 	@echo "Running benchmarks with profiling..."
-	@go test -bench=. -cpuprofile=cpu.prof -memprofile=mem.prof -blockprofile=block.prof -benchtime=1s ./internal/tools/benchmarks
+	@go test -bench=. -cpuprofile=cpu.prof -memprofile=mem.prof -blockprofile=block.prof -benchtime=20s ./internal/tools/benchmarks
 
 # View CPU profile
 view-cpu:
