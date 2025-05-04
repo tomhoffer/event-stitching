@@ -41,13 +41,13 @@ func (s *StitchingService) stitchWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			s.stitch(ctx)
+			s.Stitch(ctx)
 			time.Sleep(s.stitchingInterval)
 		}
 	}
 }
 
-func (s *StitchingService) stitch(ctx context.Context) {
+func (s *StitchingService) Stitch(ctx context.Context) {
 	// Create a helper function for preparing failure results
 	fail := func(err error) error {
 		return fmt.Errorf("stitch: %w", err)
