@@ -2,7 +2,6 @@ package benchmarks
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"testing"
 	"time"
@@ -12,21 +11,6 @@ import (
 	"github.com/tomashoffer/event-stitching/internal/db"
 	"github.com/tomashoffer/event-stitching/internal/tools"
 )
-
-func waitForEvents(ctx context.Context, eventRepo db.EventRepository, expectedCount int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		count, err := eventRepo.GetEventsCount(ctx)
-		if err != nil {
-			return err
-		}
-		if count == expectedCount {
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for %d events", expectedCount)
-}
 
 func BenchmarkStitchingWithDB(b *testing.B) {
 	// Setup
