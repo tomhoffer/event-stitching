@@ -2,22 +2,19 @@ package db
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type ProfileRepository interface {
-	TryGetProfilesByIdentifiers(ctx context.Context, identifier EventIdentifier) (profiles []Profile, found bool, err error)
+	TryGetProfilesByIdentifiers(ctx context.Context, identifiers EventIdentifier) ([]Profile, bool, error)
 	UpdateProfileById(ctx context.Context, id int, profile Profile) error
-	InsertProfile(ctx context.Context, profile Profile) (id int, err error)
+	InsertProfile(ctx context.Context, profile Profile) (int, error)
 	GetAllProfiles(ctx context.Context) ([]Profile, error)
-	EnrichProfileByIdentifiers(ctx context.Context, profileId int, identifier EventIdentifier) error
+	EnrichProfileByIdentifiers(ctx context.Context, id int, identifiers EventIdentifier) error
 	MergeProfiles(ctx context.Context, profileIds []int) error
 }
 
@@ -33,71 +30,109 @@ func NewPgProfileRepository(pool *pgxpool.Pool) *PgProfileRepository {
 	}
 }
 
-func (r *PgProfileRepository) getProfileByIdentifier(ctx context.Context, identifierName string, identifierVal string) (Profile, bool, error) {
-	if identifierVal == "" {
-		return Profile{}, false, nil
+func (r *PgProfileRepository) getProfileByIdentifier(ctx context.Context, identifier string, value string) ([]Profile, error) {
+	query := `
+		SELECT id, cookie, message_id, phone
+		FROM profiles
+		WHERE ` + identifier + ` = $1`
+
+	// Get transaction from context if available
+	tx, _ := ctx.Value(TransactionKey{}).(pgx.Tx)
+
+	var rows pgx.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.Query(ctx, query, value)
+	} else {
+		rows, err = r.pool.Query(ctx, query, value)
 	}
 
-	identifierName = strings.ToLower(identifierName)
-	row := r.pool.QueryRow(ctx, `
-			SELECT * FROM profiles WHERE `+identifierName+` = $1`, identifierVal)
-
-	var profile Profile
-	var profileId int
-	err := row.Scan(&profileId, &profile.Cookie, &profile.MessageId, &profile.Phone)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Profile{}, false, nil
-		}
-		return Profile{}, false, fmt.Errorf("failed to get profile: %w", err)
+		return nil, fmt.Errorf("failed to query profile by %s: %w", identifier, err)
 	}
-	return profile, true, nil
+	defer rows.Close()
+
+	return pgx.CollectRows(rows, pgx.RowToStructByName[Profile])
 }
 
-func (r *PgProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, identifier EventIdentifier) (profiles []Profile, found bool, err error) {
-	var result []Profile
-	profileFound := false
-	identifierNames := identifier.GetIdentifierNames()
-	for _, identifierName := range identifierNames {
-		identifierVal, found := identifier.GetIdentifierValueByName(identifierName)
-		if !found {
-			continue
-		}
-		profile, found, err := r.getProfileByIdentifier(ctx, identifierName, identifierVal)
+func (r *PgProfileRepository) TryGetProfilesByIdentifiers(ctx context.Context, identifiers EventIdentifier) ([]Profile, bool, error) {
+	var profiles []Profile
+	var err error
+
+	// Try to find profiles by each identifier
+	if identifiers.Cookie != "" {
+		profiles, err = r.getProfileByIdentifier(ctx, "cookie", identifiers.Cookie)
 		if err != nil {
-			return result, profileFound, fmt.Errorf("failed to get profile by %s: %w", identifierName, err)
+			return nil, false, err
 		}
-		if !found {
-			r.log.Debug("Profile not found by identifier, trying next identifier",
-				"identifier", identifierName,
-				"value", identifierVal)
-			continue
+		if len(profiles) > 0 {
+			return profiles, true, nil
 		}
-		result = append(result, profile)
-		profileFound = true
 	}
 
-	if len(result) == 0 {
-		r.log.Debug("No profile found for any identifier", "identifier", identifier)
+	if identifiers.MessageId != "" {
+		profiles, err = r.getProfileByIdentifier(ctx, "message_id", identifiers.MessageId)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(profiles) > 0 {
+			return profiles, true, nil
+		}
 	}
-	return result, profileFound, nil
+
+	if identifiers.Phone != "" {
+		profiles, err = r.getProfileByIdentifier(ctx, "phone", identifiers.Phone)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(profiles) > 0 {
+			return profiles, true, nil
+		}
+	}
+
+	return nil, false, nil
 }
 
 func (r *PgProfileRepository) UpdateProfileById(ctx context.Context, id int, profile Profile) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE profiles SET cookie = $1, message_id = $2, phone = $3 WHERE id = $4`,
-		profile.Cookie, profile.MessageId, profile.Phone, id)
+	query := `
+		UPDATE profiles 
+		SET cookie = $1, message_id = $2, phone = $3
+		WHERE id = $4`
+
+	// Get transaction from context if available
+	tx, _ := ctx.Value(TransactionKey{}).(pgx.Tx)
+
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(ctx, query, profile.Cookie, profile.MessageId, profile.Phone, id)
+	} else {
+		_, err = r.pool.Exec(ctx, query, profile.Cookie, profile.MessageId, profile.Phone, id)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to update profile: %w", err)
 	}
 	return nil
 }
 
-func (r *PgProfileRepository) InsertProfile(ctx context.Context, profile Profile) (profileId int, err error) {
+func (r *PgProfileRepository) InsertProfile(ctx context.Context, profile Profile) (int, error) {
+	query := `
+		INSERT INTO profiles (cookie, message_id, phone)
+		VALUES ($1, $2, $3)
+		RETURNING id`
+
+	// Get transaction from context if available
+	tx, _ := ctx.Value(TransactionKey{}).(pgx.Tx)
+
+	var row pgx.Row
+	if tx != nil {
+		row = tx.QueryRow(ctx, query, profile.Cookie, profile.MessageId, profile.Phone)
+	} else {
+		row = r.pool.QueryRow(ctx, query, profile.Cookie, profile.MessageId, profile.Phone)
+	}
+
 	var id int
-	err = r.pool.QueryRow(ctx, `
-		INSERT INTO profiles (cookie, message_id, phone) VALUES ($1, $2, $3) RETURNING id`,
-		profile.Cookie, profile.MessageId, profile.Phone).Scan(&id)
+	err := row.Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert profile: %w", err)
 	}
@@ -105,7 +140,21 @@ func (r *PgProfileRepository) InsertProfile(ctx context.Context, profile Profile
 }
 
 func (r *PgProfileRepository) GetAllProfiles(ctx context.Context) ([]Profile, error) {
-	rows, err := r.pool.Query(ctx, "SELECT * FROM profiles")
+	query := `
+		SELECT id, cookie, message_id, phone
+		FROM profiles`
+
+	// Get transaction from context if available
+	tx, _ := ctx.Value(TransactionKey{}).(pgx.Tx)
+
+	var rows pgx.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.Query(ctx, query)
+	} else {
+		rows, err = r.pool.Query(ctx, query)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to query profiles: %w", err)
 	}
@@ -114,59 +163,117 @@ func (r *PgProfileRepository) GetAllProfiles(ctx context.Context) ([]Profile, er
 	return pgx.CollectRows(rows, pgx.RowToStructByName[Profile])
 }
 
-func (r *PgProfileRepository) EnrichProfileByIdentifiers(ctx context.Context, profileId int, identifier EventIdentifier) error {
-	identifierNames := identifier.GetIdentifierNames()
-	for _, identifierName := range identifierNames {
-		identifierVal, found := identifier.GetIdentifierValueByName(identifierName)
-		if !found || identifierVal == "" {
-			continue
-		} // TODO group all updates into 1 query
-		_, err := r.pool.Exec(ctx, `UPDATE profiles SET `+identifierName+` = $1 WHERE id = $2`, identifierVal, profileId)
-		if err != nil {
-			return fmt.Errorf("failed to add identifier to profile: %w", err)
-		}
+func (r *PgProfileRepository) EnrichProfileByIdentifiers(ctx context.Context, id int, identifiers EventIdentifier) error {
+	query := `
+		UPDATE profiles 
+		SET 
+			cookie = COALESCE(NULLIF($1, ''), cookie),
+			message_id = COALESCE(NULLIF($2, ''), message_id),
+			phone = COALESCE(NULLIF($3, ''), phone)
+		WHERE id = $4`
+
+	// Get transaction from context if available
+	tx, _ := ctx.Value(TransactionKey{}).(pgx.Tx)
+
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(ctx, query, identifiers.Cookie, identifiers.MessageId, identifiers.Phone, id)
+	} else {
+		_, err = r.pool.Exec(ctx, query, identifiers.Cookie, identifiers.MessageId, identifiers.Phone, id)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to enrich profile: %w", err)
 	}
 	return nil
 }
 
-// MergeProfiles merges multiple profiles into a single profile by:
-// 1. Taking the lexicographically lowest non-empty value for each field
-// 2. Updating the profile with the lowest ID with the merged values
-// 3. Deleting all other profiles
-//
-// The method ensures atomicity by performing all operations in a single SQL transaction.
-// Profile IDs are sorted to ensure consistent merging behavior.
 func (r *PgProfileRepository) MergeProfiles(ctx context.Context, profileIds []int) error {
+	if len(profileIds) < 2 {
+		return nil
+	}
 
-	// Sort profile IDs to ensure consistent merging
-	orderedIds := make([]int, len(profileIds))
-	copy(orderedIds, profileIds)
-	sort.Ints(orderedIds)
+	// Get transaction from context if available
+	tx, _ := ctx.Value(TransactionKey{}).(pgx.Tx)
+	startedTx := false
 
-	// Merge profiles and delete others in a single transaction
-	_, err := r.pool.Exec(ctx, `
-		WITH merged AS (
-			SELECT 
-				MIN(NULLIF(cookie, '')) as cookie,
-				MIN(NULLIF(message_id, '')) as message_id,
-				MIN(NULLIF(phone, '')) as phone
-			FROM profiles 
-			WHERE id = ANY($1)
-		),
-		updated AS (
-			UPDATE profiles 
-			SET 
-				cookie = COALESCE(merged.cookie, profiles.cookie),
-				message_id = COALESCE(merged.message_id, profiles.message_id),
-				phone = COALESCE(merged.phone, profiles.phone)
-			FROM merged
-			WHERE id = $2
-		)
-		DELETE FROM profiles 
-		WHERE id = ANY($1) AND id != $2`,
-		orderedIds, orderedIds[0])
+	// Start a transaction if one wasn't provided
+	var err error
+	if tx == nil {
+		tx, err = r.pool.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		startedTx = true
+		defer tx.Rollback(ctx)
+	}
+
+	// Create a new context with the transaction
+	txCtx := context.WithValue(ctx, TransactionKey{}, tx)
+
+	// Get all profiles to merge with row locks
+	query := `
+		SELECT id, cookie, message_id, phone
+		FROM profiles
+		WHERE id = ANY($1)
+		ORDER BY id ASC
+		FOR UPDATE`
+
+	rows, err := tx.Query(ctx, query, profileIds)
 	if err != nil {
-		return fmt.Errorf("failed to merge and delete profiles: %w", err)
+		return fmt.Errorf("failed to query profiles to merge: %w", err)
+	}
+	defer rows.Close()
+
+	profiles, err := pgx.CollectRows(rows, pgx.RowToStructByName[Profile])
+	if err != nil {
+		return fmt.Errorf("failed to collect profiles to merge: %w", err)
+	}
+
+	if len(profiles) < 2 {
+		return nil
+	}
+
+	// Find the lowest non-empty values for each field
+	var lowestCookie, lowestMessageId, lowestPhone string
+	for _, p := range profiles {
+		if p.Cookie != "" && (lowestCookie == "" || p.Cookie < lowestCookie) {
+			lowestCookie = p.Cookie
+		}
+		if p.MessageId != "" && (lowestMessageId == "" || p.MessageId < lowestMessageId) {
+			lowestMessageId = p.MessageId
+		}
+		if p.Phone != "" && (lowestPhone == "" || p.Phone < lowestPhone) {
+			lowestPhone = p.Phone
+		}
+	}
+
+	// Create merged profile with the lowest values
+	merged := profiles[0]
+	merged.Cookie = lowestCookie
+	merged.MessageId = lowestMessageId
+	merged.Phone = lowestPhone
+
+	// Update the first profile with merged data using the transaction context
+	if err := r.UpdateProfileById(txCtx, merged.Id, merged); err != nil {
+		return err
+	}
+
+	// Delete all other profiles
+	deleteQuery := `
+		DELETE FROM profiles
+		WHERE id = ANY($1) AND id != $2`
+
+	_, err = tx.Exec(ctx, deleteQuery, profileIds, merged.Id)
+	if err != nil {
+		return fmt.Errorf("failed to delete merged profiles: %w", err)
+	}
+
+	// Commit if we started the transaction
+	if startedTx {
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
 	}
 
 	return nil

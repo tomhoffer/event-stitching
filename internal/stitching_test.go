@@ -123,9 +123,11 @@ var _ = Describe("Stitching Service", func() {
 			return profileRepo.GetAllProfiles(ctx)
 		}).Should(HaveLen(1))
 
-		profiles, err := profileRepo.GetAllProfiles(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(profiles[0]).To(Equal(existingProfile))
+		// Wait for the profile to be updated
+		Eventually(func() db.Profile {
+			profiles, _ := profileRepo.GetAllProfiles(ctx)
+			return profiles[0]
+		}).Should(Equal(existingProfile))
 
 		// Verify event was processed
 		Eventually(func() []db.EventRecord {

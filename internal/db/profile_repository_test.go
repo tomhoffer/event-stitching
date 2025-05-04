@@ -64,21 +64,33 @@ var _ = Describe("Profile Repository", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeTrue())
-		Expect(retrievedProfiles[0]).To(Equal(profile))
+		Expect(retrievedProfiles[0]).To(MatchFields(IgnoreExtras, Fields{
+			"Cookie":    Equal(profile.Cookie),
+			"MessageId": Equal(profile.MessageId),
+			"Phone":     Equal(profile.Phone),
+		}))
 
 		retrievedProfiles, found, err = tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{
 			MessageId: "test-message",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeTrue())
-		Expect(retrievedProfiles[0]).To(Equal(profile))
+		Expect(retrievedProfiles[0]).To(MatchFields(IgnoreExtras, Fields{
+			"Cookie":    Equal(profile.Cookie),
+			"MessageId": Equal(profile.MessageId),
+			"Phone":     Equal(profile.Phone),
+		}))
 
 		retrievedProfiles, found, err = tc.repo.TryGetProfilesByIdentifiers(ctx, db.EventIdentifier{
 			Phone: "123456789",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(found).To(BeTrue())
-		Expect(retrievedProfiles[0]).To(Equal(profile))
+		Expect(retrievedProfiles[0]).To(MatchFields(IgnoreExtras, Fields{
+			"Cookie":    Equal(profile.Cookie),
+			"MessageId": Equal(profile.MessageId),
+			"Phone":     Equal(profile.Phone),
+		}))
 	})
 
 	DescribeTable("should enrich profile data",
@@ -216,7 +228,12 @@ var _ = Describe("Profile Repository", func() {
 			retrievedProfiles, found, err := tc.repo.TryGetProfilesByIdentifiers(ctx, identifiers)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(found).To(BeTrue())
-			Expect(retrievedProfiles[0]).To(Equal(profile))
+			Expect(retrievedProfiles[0]).To(MatchFields(
+				IgnoreExtras, Fields{
+					"Cookie":    Equal(profile.Cookie),
+					"MessageId": Equal(profile.MessageId),
+					"Phone":     Equal(profile.Phone),
+				}))
 		}
 	})
 
@@ -384,6 +401,7 @@ var _ = Describe("Profile Repository", func() {
 			lowestId := profileIds[0]
 			mergedProfiles, err := tc.repo.GetAllProfiles(ctx)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(mergedProfiles).To(HaveLen(1))
 			Expect(mergedProfiles[0]).To(Equal(db.Profile{
 				Id:        lowestId,
 				Cookie:    "a-cookie",
