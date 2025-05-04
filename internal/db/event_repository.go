@@ -119,7 +119,7 @@ func (r *PgEventRepository) GetUnProcessedEvents(ctx context.Context, batchSize 
 		WHERE processed = false 
 		ORDER BY event_timestamp ASC 
 		LIMIT $1 
-		FOR UPDATE`
+		FOR UPDATE SKIP LOCKED`
 
 	// Get transaction from context if available
 	tx, _ := ctx.Value(TransactionKey{}).(pgx.Tx)
