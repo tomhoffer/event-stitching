@@ -1,13 +1,13 @@
 # Event Stitching Service
 
-A Go service that handles event processing and identity stitching. The service processes events with various identifiers (cookies, message IDs, phone numbers) and maintains a unified view of customer identities.
+A dummy Golang service for resolving identity of customers performing actions on e-commerce websites. The service processes events with various identifiers (cookies, message IDs, phone numbers) and maintains a unified view of customer identities.
 
 ## Features
 
-- Event ingestion with multiple identifiers
+- Event ingestion, where event represents an action performed by the customer (e.g. page view, purchase of some product, adding a product into basket)
 - Concurrent event processing
-- Identity stitching based on event timestamps
-- PostgreSQL storage with JSONB support
+- Concurrent merging of customer profiles which share common identifiers (cookie, email, phone)
+- PostgreSQL storage
 - Ginkgo/Gomega test suite
 
 ## Prerequisites
